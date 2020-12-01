@@ -44,11 +44,35 @@ void addRequest(int pid) {
 //*******************
 //User Input Commands
 //*******************
-void saveFile() {}
+void saveFile(char buffer[32]) {
+    //user inputted save test.c 4:[this is what I want written in the file]
+    //take the buffer, format it into a write test.c 4:[this is what I want written in the file]
+    //once the request is formatted correctly, try to establish an establishTCPConnection()
+    //if true, call a sendToServer() request to the file server, and if successful, clear this request from the request array
+}
 
-void readFile() {}
+void readFile(char buffer[32]) {
+    //user inputs read filename
+    //format to load filename from buffer
+    //once the request is formatted correctly, try to establish an establishTCPConnection()
+    //if true, call a receiveFromServer() request to the memory server, and if successful, clear this request from the request array
+    //if you get a return of 0, however, this means the file is not on the memory cache and needs to be loaded from file server
+    //so... try to establish a new establishTCPConnection()
+    //if successful, call a receiveFromServer() request to the file server, and if successful, clear this request from the request array
+    //for file server send read filename NOT load filename
 
-void deleteFile() {}
+    //once the file is found, print out what the server returns
+}
+
+void deleteFile(char buffer[32]) {
+    //user inputs delete filename
+    //format to rm filename from buffer
+    //once the request is formatted correctly, try to establish an establishTCPConnection()
+    //if true, call a sendToServer() request to the memory server, and if successful, cool but one more step...
+    //next, try to establish another establishTCPConnection()
+    //this time, call a sendToServer() request to the file server, and if successful, this time remove from request array
+    //Just as in read file, send the delete filename request NOT rm filename
+}
 
 //******************************
 //Format Server Requests
@@ -121,8 +145,6 @@ int setUpBackgroundListener() {}
 //Main Method
 //***********
 int main(int argc, char *args[]) {
-    //standard user input, as always
-    char buffer[32];
     //allocate memory to the array, since this is established at the beginning, we DO NOT free this memory until we finish the loop,
     //as we only allocate once, so no memory leak will occur
     requestArray = (int*)malloc(retrieveTotalAllowedThreads());
@@ -130,12 +152,17 @@ int main(int argc, char *args[]) {
     initRequestList();
 
     while(1) {
+        //standard user input, as always
+        char buffer[32];
+
         printf("Dispatcher> ");
         fgets(buffer, 32, stdin);
 
         if (addRequest()) {
+
             pthread_t thread_id;
             pthread_create(&thread_id, NULL, runProcess, (void*)&newProcess);
+
         }
         else {
 

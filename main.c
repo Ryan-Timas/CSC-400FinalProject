@@ -4,54 +4,145 @@
 #include<sys/socket.h>
 #include<string.h>
 #include<arpa/inet.h>
+#include <pthread.h>
 #include<unistd.h>
 
 //This Program was written by Ahmed and Ryan
 
-//todo:
+//todo: add a fork somewhere
 //todo: save,read,delete file function, send to file server
 
 //todo: to communicate with memory cache, must format load, rm, store commands correctly
 
 //todo: create a tcp connection using a socket, not sure where it should necessarily link to at this point, probably server ip and port number of a different team
 
+typedef struct {
+    int PID;//may be necessary, may not be we'll see
+    int requestType; //1 = save, 2 = read, 3 = delete, 0 = invalid request
+    int requestSize; //requestType filename *n*:[contents of file]
+    char *requestFileName; //requestType *filename* n:[contents of file]
+    char *requestContent; //requestType n:[*contents of file*]
+    } Request;
+
 
 int length;
-int * requestArray;
+int allowedRequests;
+int currentRequests;
 
+//*********************
+//Miscellaneous Methods
+//*********************
 //retrieves all available processors on system, then doubles
 int retrieveTotalAllowedThreads() {
     return get_nprocs_conf() *2;
 }
 
+char* getSubstring(int startingCharacter, int finalCharacter, char* buffer, int isInt) {
+    //how many characters would you like returned +1 for \0
+    int substringLength = finalCharacter - startingCharacter;
+
+    //If you would like an int to be returned, don't reserve a byte for the \0
+    char *subbuff = malloc((isInt==1)? substringLength-1: substringLength);
+    memcpy(subbuff, &buffer[startingCharacter], substringLength);
+
+    //Only add the null terminator if you don't plan to cast to int
+    if (isInt!=1) subbuff[substringLength-1] = '\0';
+
+    return subbuff;
+}
+
+
 //**************************
 //Request Management Methods
 //**************************
-void initRequestList() {
-    for (int i = 0; i < retrieveTotalAllowedThreads(); i++)
-        requestArray[i] = -1;
-    length = sizeof(requestArray);
-}
-void addRequest(int pid) {
-    for (int i = 0; i < length; ++i) {
-        if (requestArray[i] == -1) {
-            requestArray[i] = pid;
-            break;
-        }
-    }
-}
+
+//todo: remove if we don't find a use for these later on
+//void initRequestList() {
+//    for (int i = 0; i < retrieveTotalAllowedThreads(); i++)
+//        requestArray[i] = -1;
+//
+//    length = sizeof(requestArray);
+//}
+//
+//void addRequest(int pid) {
+//    for (int i = 0; i < length; ++i) {
+//        if (requestArray[i] == -1) {
+//            requestArray[i] = pid;
+//            break;
+//        }
+//    }
+//}
+//
+//void removeRequest(int pid) {
+//    for (int i = 0; i < length; ++i) {
+//        if (requestArray[i] == pid) {
+//            requestArray[i] = -1;
+//            break;
+//        }
+//    }
+//}
 
 //*******************
 //User Input Commands
 //*******************
-void saveFile(char buffer[32]) {
+Request interpretUserInput(char *userInput) {
+    Request request;
+    int startingCharacter = 5;
+
+    //Determine which request the user is trying to make
+    switch (userInput[0]) {
+        case 's':
+            request.requestType=1;
+        case 'r':
+            request.requestType=2;
+        case 'd': {
+            request.requestType=3;
+            //since delete is a longer word than the other two...
+            startingCharacter += 2;
+        }
+        default: {
+            request.requestType=0;
+        }
+    }
+
+    //find fileName, and fileSize/fileContent if applicable
+    if (request.requestType != 0) {
+        for (int i = startingCharacter; i < 32; ++i) {
+            //first breakpoint, check for filename
+            if(userInput[i] == ' '|| userInput[i] == '\n') {
+                request.requestFileName = getSubstring(startingCharacter, i, userInput, 0);
+
+                //if read, go to second and third breakpoint
+                if (request.requestType == 1) {
+                    startingCharacter = i;
+                    while (userInput[i] != ':') i++;
+
+                    //second breakpoint
+                    request.requestSize = atoi(getSubstring(startingCharacter, i, userInput, 1));
+
+                    //bypass characters :[ straight to the first character of the file
+                    startingCharacter = i + 2;
+                    while (userInput[i] != ']') i++;
+
+                    //third breakpoint
+                    request.requestContent = getSubstring(startingCharacter, i, userInput, 0);
+                }
+                break;
+            }
+        }
+    }
+
+    return request;
+}
+
+void saveFile(Request request) {
     //user inputted save test.c 4:[this is what I want written in the file]
     //take the buffer, format it into a write test.c 4:[this is what I want written in the file]
     //once the request is formatted correctly, try to establish an establishTCPConnection()
     //if true, call a sendToServer() request to the file server, and if successful, clear this request from the request array
 }
 
-void readFile(char buffer[32]) {
+void readFile(Request request) {
     //user inputs read filename
     //format to load filename from buffer
     //once the request is formatted correctly, try to establish an establishTCPConnection()
@@ -64,7 +155,7 @@ void readFile(char buffer[32]) {
     //once the file is found, print out what the server returns
 }
 
-void deleteFile(char buffer[32]) {
+void deleteFile(Request request) {
     //user inputs delete filename
     //format to rm filename from buffer
     //once the request is formatted correctly, try to establish an establishTCPConnection()
@@ -72,6 +163,19 @@ void deleteFile(char buffer[32]) {
     //next, try to establish another establishTCPConnection()
     //this time, call a sendToServer() request to the file server, and if successful, this time remove from request array
     //Just as in read file, send the delete filename request NOT rm filename
+}
+
+
+void* beginRequestThread(void* requestPointer) {
+    Request request = *(Request *)requestPointer;
+
+    switch (request.requestType) {
+        case 1: saveFile(request);
+        case 2: readFile(request);
+        case 3: deleteFile(request);
+    }
+
+    currentRequests = currentRequests -1;
 }
 
 //******************************
@@ -104,8 +208,7 @@ int establishTCPConnection(int forFileServer, int serverSocket) {
     int port = (forFileServer == 1)? 108: 107;
 
     struct sockaddr_in remote= {0};
-    //todo: set the ip of the local host here, don't know if we need a command to get this or can just use risingstar's ip
-    remote.sin_addr.s_addr = inet_addr("todo");
+    remote.sin_addr.s_addr = inet_addr("10.0.95.31");
     remote.sin_family = AF_INET;
     remote.sin_port = htons(port);
 
@@ -145,11 +248,9 @@ int setUpBackgroundListener() {}
 //Main Method
 //***********
 int main(int argc, char *args[]) {
-    //allocate memory to the array, since this is established at the beginning, we DO NOT free this memory until we finish the loop,
-    //as we only allocate once, so no memory leak will occur
-    requestArray = (int*)malloc(retrieveTotalAllowedThreads());
-
-    initRequestList();
+    //set how many threads can occur at a given time, only need to keep an int since there's no requirement
+    // to print request details outside of its own thread
+    allowedRequests = retrieveTotalAllowedThreads();
 
     while(1) {
         //standard user input, as always
@@ -158,31 +259,19 @@ int main(int argc, char *args[]) {
         printf("Dispatcher> ");
         fgets(buffer, 32, stdin);
 
-        if (addRequest()) {
+        //if a new request won't go over the thread limit
+        if (currentRequests+1 <= allowedRequests) {
+            currentRequests ++;
 
-            pthread_t thread_id;
-            pthread_create(&thread_id, NULL, runProcess, (void*)&newProcess);
+            Request request = interpretUserInput(buffer);
 
-        }
-        else {
-
-        }
-
-        switch (buffer[0]) {
-            case 'r': {
-                printf("read");
-                printf("te");
-            }
-            case 's': {
-                printf('write');
-            }
-            case 'd': {
-                printf('delete');
-            }
-            default: {
-                printf('not recognized');
+            if (request.requestType != 0) {
+                pthread_t thread_id;
+                pthread_create(&thread_id, NULL, beginRequestThread, (void*)&request);
             }
         }
+
+        else printf("Please wait for a request to open up.");
     }
 }
 

@@ -65,30 +65,60 @@ char* getSubstring(int startingCharacter, int finalCharacter, char* buffer, int 
 //*******************
 //TCP Request Methods
 //*******************
-void * processClientRequest(void * request) {
-    int connectionToClient = *(int *)request;
-    char receiveLine[BUF_SIZE];
+//communicate with server
+char* sendTCPRequest(char* request,int lenRqst, int forFileServer) {
+    int  serverSocket, bytesRead;
+
     char sendLine[BUF_SIZE];
+    char receiveLine[BUF_SIZE];
 
-    int bytesReadFromClient = 0;
-    // Read the request that the client has
-    while ( (bytesReadFromClient = read(connectionToClient, receiveLine, BUF_SIZE)) > 0) {
-        // Need to put a NULL string terminator at end
-        receiveLine[bytesReadFromClient] = 0;
+    // Setup server connection
+    struct sockaddr_in serverAddress;
+    bzero(&serverAddress, sizeof(serverAddress));
 
-        // Show what client sent
-        printf("Received: %s\n", receiveLine);
-
-        // Print text out to buffer, and then write it to client (connfd)
-        snprintf(sendLine, sizeof(sendLine), "true");
-        printf("%Sending s\n", sendLine);
-        write(connectionToClient, sendLine, strlen(sendLine));
-
-        // Zero out the receive line so we do not get artifacts from before
-        bzero(&receiveLine, sizeof(receiveLine));
-        close(connectionToClient);
+    // Create socket to server
+    if ( (serverSocket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        printf("Unable to create socket\n");
+        return "error";
     }
+
+    // Setup the type of connection and where the server is to connect to
+    serverAddress.sin_family = AF_INET; // AF_INET - talk over a network, could be a local socket
+    serverAddress.sin_port   = htons((forFileServer ==1 )? 1028: 1029);
+
+    if (inet_pton(AF_INET, "127.0.0.1", &serverAddress.sin_addr) <= 0) {
+        printf("Unable to convert IP for server address\n");
+        return "error";
+    }
+
+    // Connect to server, if we cannot connect, then exit out
+    if (connect(serverSocket, (struct sockaddr *) &serverAddress, sizeof(serverAddress)) < 0) {
+        printf("Unable to connect to server");
+    }
+
+    snprintf(sendLine, sizeof(sendLine), request);
+
+    // Write will actually write to a file (in this case a socket) which will transmit it to the server
+    write(serverSocket, sendLine, lenRqst);
+
+    // Now start reading from the server
+    // Read will read from socket into receiveLine up to BUF_SIZE
+    while ( (bytesRead = read(serverSocket, receiveLine, BUF_SIZE)) > 0) {
+        receiveLine[bytesRead] = 0; // Make sure we put the null terminator at the end of the buffer
+        printf("Received %d bytes from server with message: %s\n", bytesRead, receiveLine);
+
+        // Got response, get out of here
+        break;
+    }
+
+    // Close the server socket
+    close(serverSocket);
+
+    strncat(receiveLine, "\0", 1);
+
+    return receiveLine;
 }
+
 
 // We need to make sure we close the connection on signal received, otherwise we have to wait
 // for server to timeout.
@@ -255,86 +285,6 @@ void* beginRequestThread(void* clientConnection) {
 
     currentRequests = currentRequests -1;
 }
-
-//communicate with server
-char* sendTCPRequest(int forFileServer, char* request,int lenRqst) {
-    int  serverSocket, bytesRead;
-
-    char sendLine[BUF_SIZE];
-    char receiveLine[BUF_SIZE];
-
-    // Setup server connection
-    struct sockaddr_in serverAddress;
-    bzero(&serverAddress, sizeof(serverAddress));
-
-    // Create socket to server
-    if ( (serverSocket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        printf("Unable to create socket\n");
-        return "error";
-    }
-
-    // Setup the type of connection and where the server is to connect to
-    serverAddress.sin_family = AF_INET; // AF_INET - talk over a network, could be a local socket
-    serverAddress.sin_port   = htons((forFileServer ==1 )? 1028: 1029);
-
-    if (inet_pton(AF_INET, "127.0.0.1", &serverAddress.sin_addr) <= 0) {
-        printf("Unable to convert IP for server address\n");
-        return "error";
-    }
-
-    // Connect to server, if we cannot connect, then exit out
-    if (connect(serverSocket, (struct sockaddr *) &serverAddress, sizeof(serverAddress)) < 0) {
-        printf("Unable to connect to server");
-    }
-
-    snprintf(sendLine, sizeof(sendLine), request);
-
-    // Write will actually write to a file (in this case a socket) which will transmit it to the server
-    write(serverSocket, sendLine, lenRqst);
-
-    // Now start reading from the server
-    // Read will read from socket into receiveLine up to BUF_SIZE
-    while ( (bytesRead = read(serverSocket, receiveLine, BUF_SIZE)) > 0) {
-        receiveLine[bytesRead] = 0; // Make sure we put the null terminator at the end of the buffer
-        printf("Received %d bytes from server with message: %s\n", bytesRead, receiveLine);
-
-        // Got response, get out of here
-        break;
-    }
-
-    // Close the server socket
-    close(serverSocket);
-
-    strncat(receiveLine, "\0", 1);
-
-    return receiveLine;
-}
-
-////send data to the server
-//int sendToServer(int serverSocket ,char* requestType,int lenRqst) {
-//    struct timeval tv;
-//    tv.tv_sec = 20;  /* 20 Secs Timeout */
-//    tv.tv_usec = 0;
-//
-//    //if the server request times out, return a -1 as a send request cannot have a size of -1
-//    if(setsockopt(serverSocket,SOL_SOCKET,SO_SNDTIMEO,(char *)&tv,sizeof(tv)) < 0)
-//        return -1;
-//
-//    return send(serverSocket, requestType, lenRqst, 0);
-//}
-//
-////receive data from the server
-//int receiveFromServer(int serverSocket, char* Rsp, int RvcSize) {
-//    struct timeval tv;
-//    tv.tv_sec = 20;
-//    tv.tv_usec = 0;
-//
-//    //if the server request times out, return a -1 as a recv request cannot have a size of -1
-//    if(setsockopt(serverSocket, SOL_SOCKET, SO_RCVTIMEO,(char *)&tv,sizeof(tv)) < 0)
-//        return -1;
-//
-//    return recv(serverSocket, Rsp, RvcSize, 0);
-//}
 
 //***********
 //Main Method
